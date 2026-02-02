@@ -329,24 +329,32 @@ if st.session_state.articles:
             file_name=f"news_{st.session_state.get('last_query', 'results')}.csv",
             mime="text/csv"
         )
-    
-    # --- NER ENTITY EXTRACTION SECTION ---
-    st.markdown("---")
-    st.subheader("🏢 Top Trending Agencies & Brands")
-    st.info("📊 Extract and rank the most mentioned companies, agencies, and brands from the fetched articles using advanced NER")
-    
-    # Initialize session state for agencies
-    if "trending_agencies" not in st.session_state:
-        st.session_state.trending_agencies = []
+
+
+# --- NER ENTITY EXTRACTION SECTION (STANDALONE - ALWAYS VISIBLE) ---
+st.markdown("---")
+st.markdown("---")
+st.subheader("🏢 Top Trending Agencies & Brands Analyzer")
+st.info("📊 Extract and rank the most mentioned companies, agencies, and brands from your fetched articles using advanced Named Entity Recognition (NER)")
+
+# Initialize session state for agencies
+if "trending_agencies" not in st.session_state:
+    st.session_state.trending_agencies = []
+
+# Check if articles are available
+if not st.session_state.articles:
+    st.warning("⚠️ Please fetch news articles first using the search above, then come back here to extract trending entities.")
+else:
+    st.success(f"✅ Ready to analyze {len(st.session_state.articles)} articles from '{st.session_state.get('last_query', 'your search')}'")
     
     col_ner1, col_ner2 = st.columns([3, 1])
     with col_ner1:
         min_mentions = st.slider("Minimum mentions to include", min_value=2, max_value=10, value=3, 
-                                help="Filter out entities with fewer mentions")
+                                help="Filter out entities with fewer mentions", key="ner_slider")
     with col_ner2:
         st.write("")  # Spacing
         st.write("")  # Spacing
-        extract_button = st.button("🔍 Extract Trending Entities", type="primary", use_container_width=True)
+        extract_button = st.button("🔍 Extract Trending Entities", type="primary", use_container_width=True, key="extract_ner_btn")
     
     if extract_button:
         from ner_entity_extractor import extract_trending_agencies
@@ -355,7 +363,7 @@ if st.session_state.articles:
             try:
                 trending = extract_trending_agencies(
                     st.session_state.articles, 
-                    st.session_state.get('last_query', active_query),
+                    st.session_state.get('last_query', 'search'),
                     min_mentions=min_mentions,
                     top_n=10
                 )
@@ -367,7 +375,7 @@ if st.session_state.articles:
                     st.warning("⚠️ No entities found matching the criteria. Try lowering the minimum mentions.")
             except Exception as e:
                 st.error(f"❌ Error during entity extraction: {str(e)}")
-                st.info("💡 Tip: Make sure spaCy is installed. Run: `pip install spacy && python -m spacy download en_core_web_sm`")
+                st.info("💡 Tip: The system will use pattern-based extraction as fallback. For best results, install spaCy: `pip install spacy && python -m spacy download en_core_web_sm`")
     
     # Display trending agencies
     if st.session_state.trending_agencies:
@@ -425,6 +433,6 @@ if st.session_state.articles:
             data=agencies_csv,
             file_name=f"trending_agencies_{st.session_state.get('last_query', 'results')}.csv",
             mime="text/csv",
-            use_container_width=True
+            use_container_width=True,
+            key="download_agencies_btn"
         )
-
