@@ -1,0 +1,20 @@
+{
+    "ner_usage_strategy": "Use transformers-based NER pipeline (dslim/bert-base-NER) to extract ONLY entities labeled as 'ORG'. Process each headline independently. Extract entity text and position in headline for involvement scoring. Fallback to pattern-based extraction (capitalized sequences) if NER unavailable.",
+    "entity_type_enforcement": "STRICT filtering applied at multiple stages: (1) NER extracts only ORG entity_group, (2) Validate each entity with _is_valid_company_name() which excludes publishers (Reuters, Bloomberg, etc.), generic terms (government, police, etc.), locations (India, US, etc.), and non-proper nouns, (3) Reject entities shorter than 2 characters or all-numeric, (4) Final output contains ONLY companies and organizations.",
+    "entity_disambiguation_rules": "Multi-rule validation: (1) Check against excluded_publishers set - reject if match, (2) Check against generic_terms - reject single-word matches, (3) Check against location_indicators - reject geographic entities, (4) Require proper capitalization (first letter uppercase), (5) Validate company suffixes (Inc, Corp, Ltd) as positive signals, (6) Context-based: if entity appears with possessive ('Company's') = company, if after 'according to' = citation/not main actor.",
+    "involvement_scoring_logic": "Calculate 0.0-1.0 score for each entity mention using 4 factors: (1) Position Score (30%): entities in first 40% of headline get full points, (2) Subject Detection (40%): check if entity appears before action verbs (launches, announces, reports, etc.) indicating it's the subject/main actor, (3) Attribution (20%): possessive forms ('Company's') add points, citations ('according to Company') subtract points, (4) Standalone (10%): single mention vs list mention. Only entities with involvement >= 0.3 (30%) are counted as valid mentions.",
+    "noise_removal_thresholds": {
+        "minimum_mentions": "3 mentions across all articles - entities with fewer are discarded",
+        "minimum_coverage_ratio": "0.01 (1%) - entity must appear in at least 1% of total articles to be considered"
+    },
+    "dominance_ranking_method": {
+        "factors_used": [
+            "Coverage Score (30%): Percentage of articles mentioning the entity, capped at 30 points",
+            "Average Involvement Score (40%): Mean of all involvement scores for this entity, scaled to 40 points",
+            "Source Diversity (20%): Number of unique news sources mentioning entity, normalized to 20 points",
+            "Consistency Score (10%): Mentions per article ratio (higher = more consistent), normalized to 10 points"
+        ],
+        "scoring_explanation": "Total Dominance Score = Coverage + Involvement + Diversity + Consistency. Range: 0-100. Entities sorted by dominance score descending. Rank #1 has highest dominance, not just highest frequency. This ensures truly dominant companies (high involvement, wide coverage, diverse sources) rank above frequently-but-incidentally-mentioned entities."
+    },
+    "final_output_definition": "List of ONLY companies and organizations ranked by true news dominance. Each entry contains: rank (1-10), name (validated company/org), mentions (count), articles (number of articles), coverage_pct (percentage of total articles), avg_involvement (0-100), sources (unique source count), dominance_score (0-100 composite score), entity_type (always 'company'). Top 10 returned, sorted by dominance_score descending."
+}
