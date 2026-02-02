@@ -347,35 +347,39 @@ if not st.session_state.articles:
 else:
     st.success(f"✅ Ready to analyze {len(st.session_state.articles)} articles from '{st.session_state.get('last_query', 'your search')}'")
     
-    col_ner1, col_ner2 = st.columns([3, 1])
-    with col_ner1:
-        min_mentions = st.slider("Minimum mentions to include", min_value=2, max_value=10, value=3, 
-                                help="Filter out entities with fewer mentions", key="ner_slider")
-    with col_ner2:
-        st.write("")  # Spacing
-        st.write("")  # Spacing
-        extract_button = st.button("🔍 Extract Trending Entities", type="primary", use_container_width=True, key="extract_ner_btn")
+    extract_button = st.button("🔍 Extract Trending Entities", type="primary", use_container_width=True, key="extract_ner_btn")
     
     if extract_button:
-        from ner_entity_extractor import extract_trending_agencies
-        
-        with st.spinner("🧠 Analyzing articles with NER to identify trending agencies..."):
+        with st.spinner("🧠 Analyzing articles to identify trending agencies..."):
             try:
-                trending = extract_trending_agencies(
-                    st.session_state.articles, 
-                    st.session_state.get('last_query', 'search'),
-                    min_mentions=min_mentions,
-                    top_n=10
-                )
-                st.session_state.trending_agencies = trending
+                # Import only the pattern-based extraction to avoid spaCy errors
+                from ner_entity_extractor import NEREntityExtractor
                 
-                if trending:
-                    st.success(f"✅ Found {len(trending)} trending agencies/brands!")
+                extractor = NEREntityExtractor()
+                # Use pattern-based extraction (no spaCy dependency)
+                entities_with_counts = extractor.extract_entities_pattern(st.session_state.articles)
+                
+                # Rank entities - automatically filters by minimum mentions (3)
+                ranked_entities = extractor.rank_entities(
+                    entities_with_counts, 
+                    len(st.session_state.articles), 
+                    min_mentions=3  # Fixed backend threshold
+                )
+                
+                # Add rank numbers and take top 10
+                for i, entity in enumerate(ranked_entities[:10], 1):
+                    entity['rank'] = i
+                
+                st.session_state.trending_agencies = ranked_entities[:10]
+                
+                if st.session_state.trending_agencies:
+                    st.success(f"✅ Found {len(st.session_state.trending_agencies)} trending agencies/brands!")
                 else:
-                    st.warning("⚠️ No entities found matching the criteria. Try lowering the minimum mentions.")
+                    st.warning("⚠️ No entities found. Try fetching more articles.")
             except Exception as e:
                 st.error(f"❌ Error during entity extraction: {str(e)}")
-                st.info("💡 Tip: The system will use pattern-based extraction as fallback. For best results, install spaCy: `pip install spacy && python -m spacy download en_core_web_sm`")
+                import traceback
+                st.code(traceback.format_exc())
     
     # Display trending agencies
     if st.session_state.trending_agencies:
