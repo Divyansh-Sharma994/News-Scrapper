@@ -17,10 +17,12 @@ from article_scraper import enhance_articles_async
 from smart_search import expand_query
 
 # --- GEMINI SETUP ---
-GEMINI_API_KEY = "AIzaSyCqByj1Uuw8O4tGcEWbhS7uuVEVLeG0MOY"
-genai.configure(api_key=GEMINI_API_KEY)
-# Use gemini-1.5-flash for speed and cost efficiency
-gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+# Removed hardcoded key for security. Use environment variable 'GEMINI_API_KEY'.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+# Use gemini-1.5-flash for high-speed, reliable intelligence and long-context processing
+gemini_model = genai.GenerativeModel('gemini-1.5-flash') if GEMINI_API_KEY else None
 
 def classify_article_gemini(headline, source, content, cluster_names):
     """
@@ -29,6 +31,9 @@ def classify_article_gemini(headline, source, content, cluster_names):
     if not content or len(content.strip()) < 50:
         content = "No content available. Classify based on headline only."
     
+    if not gemini_model:
+        return "GENERAL"
+        
     clusters_str = ", ".join(cluster_names)
     prompt = f"""
     You are a professional news analyst. Classify the following news article into EXACTLY ONE of these sectors/clusters:
@@ -39,7 +44,7 @@ def classify_article_gemini(headline, source, content, cluster_names):
 
     Article Headline: {headline}
     Source: {source}
-    Full Content snippet: {content[:2000]}
+    Full Content snippet: {content[:3000]}
 
     Respond ONLY with the name of the cluster or "NONE". Do not provide any explanation.
     """
@@ -62,12 +67,29 @@ def classify_article_gemini(headline, source, content, cluster_names):
 
 def summarize_text_gemini(text: str) -> str:
     """
-    Uses Gemini to summarize the article content.
+    Uses Gemini 1.5 Pro to provide a comprehensive, deep-dive summary of the article.
     """
     if not text or not text.strip():
         return "No content to summarize."
+    if not gemini_model:
+        # Fallback to a simple 6-line slice if Gemini is not configured
+        words = text.split()
+        return " ".join(words[:100]) + "..."
+
     try:
-        prompt = f"Summarize the following news article briefly (6 bullet points, max 100 words total):\n\n{text[:5000]}"
+        prompt = f"""
+        You are an expert news intelligence analyst. Provide a COMPREHENSIVE and DETAILED summary of the following news article.
+        
+        Guidelines:
+        1. Capture the core event/announcement.
+        2. Detail all involved stakeholders (companies, individuals, agencies).
+        3. Explain the industry implications and future outlook.
+        4. Include any critical financial data or specific statistics mentioned.
+        5. Structure the response with a clear hierarchy (Headings/Bullets/Paragraphs) to make it highly professional.
+        
+        Article Content:
+        {text[:15000]}
+        """
         response = gemini_model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:

@@ -30,10 +30,11 @@ client = InferenceClient(
 # ======================
 # Gemini Setup
 # ======================
-GEMINI_API_KEY = "AIzaSyCqByj1Uuw8O4tGcEWbhS7uuVEVLeG0MOY"
-genai.configure(api_key=GEMINI_API_KEY)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 # Use gemini-1.5-flash for speed and cost efficiency
-gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+gemini_model = genai.GenerativeModel('gemini-1.5-flash') if GEMINI_API_KEY else None
 
 def summarize_text(text: str, method: str = "Hugging Face") -> str:
     if not text or not text.strip():

@@ -2,14 +2,20 @@ import google.generativeai as genai
 import json
 import re
 
-# Your API Key
-GEMINI_API_KEY = "AIzaSyCqByj1Uuw8O4tGcEWbhS7uuVEVLeG0MOY"
-genai.configure(api_key=GEMINI_API_KEY)
+import os
+
+# Use environment variable for security
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 def get_sector_via_gemini(query):
     """
     Uses Gemini AI to determine the industry sector of a keyword.
     """
+    if not GEMINI_API_KEY:
+        return query.title()
+
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         
