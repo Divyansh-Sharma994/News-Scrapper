@@ -9,13 +9,17 @@ from typing import List, Dict, Tuple, Set
 import warnings
 warnings.filterwarnings('ignore')
 
-# Use transformers-based NER (no spaCy dependency issues)
+# Use transformers-based NER (optional - fallback to pattern-based)
+NER_AVAILABLE = False
+ner_pipeline = None
+
 try:
     from transformers import pipeline
-    NER_AVAILABLE = True
-    # Use a lightweight, fast NER model
     ner_pipeline = pipeline("ner", model="dslim/bert-base-NER", aggregation_strategy="simple")
-except:
+    NER_AVAILABLE = True
+    print("✅ Transformers NER loaded successfully")
+except Exception as e:
+    print(f"⚠️ Transformers not available, using pattern-based extraction: {e}")
     NER_AVAILABLE = False
     ner_pipeline = None
 
@@ -193,7 +197,8 @@ class AdvancedNERExtractor:
                 )
                 
                 # Only count if involvement > threshold (main actor)
-                if involvement >= 0.3:  # Minimum 30% involvement
+                # Lowered to 0.2 (20%) to capture more entities in smaller datasets
+                if involvement >= 0.2:
                     entity_data[entity]['mentions'] += 1
                     entity_data[entity]['involvement_scores'].append(involvement)
                     entity_data[entity]['headlines'].append(headline)
@@ -265,12 +270,14 @@ class AdvancedNERExtractor:
             involvement_scores = data['involvement_scores']
             source_count = len(data['sources'])
             
-            # NOISE REMOVAL: Minimum thresholds
-            if mentions < 3:  # Minimum 3 mentions
+            # NOISE REMOVAL: Minimum thresholds (adjusted for smaller datasets)
+            if mentions < 2:  # Minimum 2 mentions (lowered from 3)
                 continue
             
             coverage_ratio = article_count / max(total_articles, 1)
-            if coverage_ratio < 0.01:  # Must appear in at least 1% of articles
+            # Dynamic threshold: 1% for large datasets, 0.5% for smaller ones
+            min_coverage = 0.005 if total_articles > 100 else 0.003
+            if coverage_ratio < min_coverage:
                 continue
             
             # DOMINANCE SCORE CALCULATION
