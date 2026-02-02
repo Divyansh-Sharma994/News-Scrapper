@@ -1,6 +1,6 @@
 """
 NER-based Entity Extraction for News Intelligence
-Uses spaCy's pre-trained NER models to identify organizations, companies, and brands
+Uses pattern-based extraction (spaCy optional)
 """
 
 import re
@@ -9,18 +9,21 @@ from typing import List, Dict, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
-# Try to import spaCy, fallback to pattern-based if not available
-try:
-    import spacy
-    SPACY_AVAILABLE = True
-    try:
-        nlp = spacy.load("en_core_web_sm")
-    except:
-        # If model not found, we'll download it later
-        nlp = None
-except ImportError:
-    SPACY_AVAILABLE = False
-    nlp = None
+# Try to import spaCy, but don't fail if not available
+SPACY_AVAILABLE = False
+nlp = None
+
+# Commenting out spaCy to avoid pydantic compatibility issues
+# try:
+#     import spacy
+#     SPACY_AVAILABLE = True
+#     try:
+#         nlp = spacy.load("en_core_web_sm")
+#     except:
+#         nlp = None
+# except ImportError:
+#     SPACY_AVAILABLE = False
+#     nlp = None
 
 
 class NEREntityExtractor:
