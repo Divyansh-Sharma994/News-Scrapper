@@ -37,3 +37,19 @@ All notable changes to this project will be documented in this file.
 - **Code Quality**: Rewrote comments in `app2.py`, `article_scraper.py`, and `gdelt_fetcher.py` to be "ELI5" (Explain Like I'm 5) for better readability.
 - **Performance**: Increased network timeouts in `gdelt_fetcher.py` and `article_scraper.py` for better reliability on slow connections.
 - **Bug Fix**: Fixed Excel download MIME type in `app2.py` to prevent "file corrupted" errors.
+
+## [Advanced AI Enhancement] - 2026-02-02
+
+### Added
+- **Gemini AI Integration (Advanced Architecture)**: Integrated **Google Gemini 1.5 Flash** for high-accuracy news intelligence, replacing basic keyword scripts with a cognitive engine.
+  - **Dynamic Sector Classification**: Articles are now semantically mapped to core industry sectors. 
+  - **The "No-Same-Name" Heuristic**: Implemented strict logic in `smart_search.py` so the identified sector is never a literal repetition of the query. For example, a search for *"shoes"* triggers a mapping to *"Lifestyle & Consumer"* or *"Retail Logistics"*.
+  - **Deep-Article Intelligence Summaries**: Replaced basic first-paragraph clipping with coherent, AI-generated bulleted summaries that analyze the *full text* of the article.
+  - **Smart Contextual Expansion**: Developed a preprocessing layer that uses Gemini to broaden niche queries into professional search strings before they hit the RSS feeds.
+  
+- **Technical workflow & Techniques**:
+  - **Semantic Parsing**: Uses JSON-mode prompts to ensure deterministic AI output for sector names.
+  - **Heuristic Fallbacks**: Added logic to verify AI classification against a predefined list of core industries while allowing descriptive expansion for niche topics.
+  - **Async Enrichment**: Integrated the AI classification loop directly into the `aiohttp` parallel scraping pipeline to minimize latency.
+
+- **Satyam's Contribution**: Satyam directed the overhaul of the sector classification engine, specifically the transition from keyword matching to Gemini-powered semantic analysis. He ensured that the "Sector properly for sector classification" requirement was met with high precision.

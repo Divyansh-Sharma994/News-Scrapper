@@ -8,10 +8,71 @@ from io import BytesIO
 import asyncio
 import aiohttp
 import re
+import google.generativeai as genai
+import json
 
 # Import our helper tools (which we wrote in other files)
 from gdelt_fetcher import fetch_gdelt_simple
 from article_scraper import enhance_articles_async
+from smart_search import expand_query
+
+# --- GEMINI SETUP ---
+GEMINI_API_KEY = "AIzaSyCqByj1Uuw8O4tGcEWbhS7uuVEVLeG0MOY"
+genai.configure(api_key=GEMINI_API_KEY)
+# Use gemini-1.5-flash for speed and cost efficiency
+gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+
+def classify_article_gemini(headline, source, content, cluster_names):
+    """
+    Uses Gemini to classify an article into one of the provided clusters.
+    """
+    if not content or len(content.strip()) < 50:
+        content = "No content available. Classify based on headline only."
+    
+    clusters_str = ", ".join(cluster_names)
+    prompt = f"""
+    You are a professional news analyst. Classify the following news article into EXACTLY ONE of these sectors/clusters:
+    [{clusters_str}]
+
+    If it fits multiple, pick the most relevant one. 
+    If it fits NONE of them, respond with "NONE".
+
+    Article Headline: {headline}
+    Source: {source}
+    Full Content snippet: {content[:2000]}
+
+    Respond ONLY with the name of the cluster or "NONE". Do not provide any explanation.
+    """
+    try:
+        response = gemini_model.generate_content(prompt)
+        result = response.text.strip()
+        # Clean up in case Gemini adds markdown or extra text
+        result = result.replace("**", "").replace('"', '').replace("'", "").strip()
+        
+        if result in cluster_names:
+            return result
+        else:
+            # Check for case-insensitive match
+            for c in cluster_names:
+                if result.lower() == c.lower():
+                    return c
+            return "GENERAL"
+    except Exception:
+        return "GENERAL"
+
+def summarize_text_gemini(text: str) -> str:
+    """
+    Uses Gemini to summarize the article content.
+    """
+    if not text or not text.strip():
+        return "No content to summarize."
+    try:
+        prompt = f"Summarize the following news article briefly (6 bullet points, max 100 words total):\n\n{text[:5000]}"
+        response = gemini_model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        return f"Gemini Summarization Error: {e}"
+
 
 # --- PAGE SETUP ---
 # This configures the browser tab title and layout
@@ -59,26 +120,55 @@ st.caption("Enter a keyword to find the latest news articles with full content p
 if "articles" not in st.session_state:
     st.session_state.articles = []
 
-# --- INPUT SECTION (Search Bar) ---
-col1, col2 = st.columns([3, 1])
-with col1:
-    query = st.text_input("🔍 Enter Keyword", "Artificial Intelligence", help="Type any topic")
-with col2:
-    duration = st.number_input("📅 Days back", min_value=1, max_value=30, value=7)
+if "custom_mode" not in st.session_state:
+    st.session_state.custom_mode = False
 
-st.markdown("---")
+
+# --- INPUT SECTION (Sector & Keyword) ---
+sector_options = ["Lifestyle", "Sustainability", "Tech & AI", "Health", "Finance", "Education", "Sports", "Startups"]
+
+# Toggle Logic
+if st.button("🔄 Switch to " + ("Sector Mode" if st.session_state.custom_mode else "Manual Custom Search")):
+    st.session_state.custom_mode = not st.session_state.custom_mode
+    st.rerun()
+
+if not st.session_state.custom_mode:
+    # 🏢 SECTOR MODE
+    selected_sector = st.selectbox("📂 Select Industry Sector", 
+                                  sector_options,
+                                  help="Choose a predefined sector for automated deep-market analysis")
+    active_query = selected_sector
+    st.info(f"� AI analyzing standard sector: **{selected_sector}**")
+else:
+    # ⌨️ MANUAL MODE
+    manual_query = st.text_input("📝 Type Your Specific Niche/Sector", "Electric Aviation", 
+                                 help="Define any industry or topic not in the list")
+    active_query = manual_query
+    st.success(f"� AI performing deep-dive search for: **{manual_query}**")
+
+# Duration remains common
+duration = st.number_input("📅 Analysis Period (Days)", min_value=1, max_value=30, value=7)
+
 
 # --- SEARCH ACTION ---
-# This runs when you click the big red button
-if st.button("🚀 Find News Articles", type="primary", use_container_width=True):
+if st.session_state.custom_mode:
+    button_label = f"🔍 Search Custom: {active_query}"
+else:
+    button_label = f"🚀 Analyze {selected_sector} Sector"
+
+if st.button(button_label, type="primary", use_container_width=True):
     # --- PROGRESSIVE LOADING STATUS ---
-    # This creates the "box" that shows you what the AI is doing.
     with st.status("🤖 AI Agent is working...", expanded=True) as status:
         
+        # STEP 0: Identifies sector context via Gemini AI
+        status.write("🧠 Consulting Gemini AI for sector classification...")
+        result_context = expand_query(active_query)
+        st.session_state.sector_identified = result_context['sector_identified']
+        optimized_query = result_context['optimized_query']
+
         # STEP 1: FIND LINKS
-        status.write(f"🔍 Searching Google News for '{query}'...")
-        # We ask for up to 5000 links
-        raw_articles = fetch_gdelt_simple(query, days=duration, max_articles=5000)
+        status.write(f"🔍 Searching Google News for '{optimized_query}'...")
+        raw_articles = fetch_gdelt_simple(optimized_query, days=duration, max_articles=5000)
         
         if not raw_articles:
             status.update(label="❌ No news found!", state="error", expanded=False)
@@ -97,7 +187,6 @@ if st.button("🚀 Find News Articles", type="primary", use_container_width=True
             def update_progress(current, total):
                 percent = int((current / total) * 100)
                 progress_bar.progress(percent)
-                # Update text every few items
                 if current % 5 == 0 or current == total:
                      status.update(label=f"📖 Reading articles... ({percent}%)")
             
@@ -108,17 +197,33 @@ if st.button("🚀 Find News Articles", type="primary", use_container_width=True
                 progress_callback=update_progress
             ))
             
+            # STEP 3: CLASSIFY & SUMMARIZE WITH GEMINI
+            status.write("🤖 Performing AI Classification & Summarization...")
+            for art in enhanced_articles:
+                headline = art.get('title', '')
+                source = art.get('source', '')
+                content = art.get('full_text', '')
+                
+                # Classify
+                art['gemini_sector'] = classify_article_gemini(headline, source, content, sector_options)
+                
+                # Summarize
+                if content and not art.get('is_paywall'):
+                    art['gemini_summary'] = summarize_text_gemini(content)
+            
             progress_bar.progress(100)
             
             st.session_state.articles = enhanced_articles
-            st.session_state.last_query = query
+            st.session_state.last_query = active_query
             
             # Collapse the status box when done
             status.update(label="✅ All Done! Articles ready.", state="complete", expanded=False)
 
 # --- DISPLAY RESULTS ---
 if st.session_state.articles:
-    st.subheader(f"📋 Results for '{st.session_state.get('last_query', query)}'")
+    sector_label = st.session_state.get('sector_identified', 'GENERAL')
+    st.subheader(f"📋 Results for '{st.session_state.get('last_query', active_query)}' | Sector: {sector_label}")
+
     
     # --- SCROLLABLE CONTAINER ---
     # A box with fixed height (800px) so you can scroll inside it.
@@ -136,14 +241,33 @@ if st.session_state.articles:
             with st.container():
                 # Title fits?
                 st.markdown(f"### {i+1}. [{title}]({link})")
+                gemini_sector = article.get('gemini_sector', 'GENERAL')
+                st.markdown(f"**AI Classification:** `{gemini_sector}`")
                 st.caption(f"**Source:** {source} | **Published:** {published}")
                 
                 # DROPDOWN: "Read Full Article Content"
                 # Everything inside here is hidden until clicked
-                with st.expander("📖 Read Full Article Content"):
-                    # 1. Summary
-                    st.markdown("#### Summary")
-                    st.info(summary)
+                with st.expander("📖 Read AI Intelligence Summary & Content"):
+                    # 1. Structured 6-Line Summary
+                    st.markdown("#### 📄 Intelligence Summary (AI Generated)")
+                    
+                    gemini_summary = article.get('gemini_summary')
+                    if gemini_summary:
+                        st.markdown(f"<div style='background-color: #f0f2f6; padding: 15px; border-radius: 8px; color: #000000;'>{gemini_summary.replace('\n', '<br>')}</div>", unsafe_allow_html=True)
+                    else:
+                        # Fallback to local 6-line splitting
+                        sent_list = re.split(r'(?<=[.!?])\s+', summary)
+                        clean_sents = [s.strip() for s in sent_list if len(s.strip()) > 20]
+                        
+                        if len(clean_sents) < 6:
+                            words = summary.split()
+                            if len(words) > 60:
+                                chunk = len(words) // 6
+                                clean_sents = [" ".join(words[j*chunk:(j+1)*chunk]) for j in range(6)]
+                        
+                        summary_box = "".join([f"• {s}<br><br>" for s in clean_sents[:6]])
+                        st.markdown(f"<div style='background-color: #f0f2f6; padding: 15px; border-radius: 8px; color: #000000;'>{summary_box}</div>", unsafe_allow_html=True)
+
                     
                     # 2. Full Text
                     st.markdown("#### Full Article")

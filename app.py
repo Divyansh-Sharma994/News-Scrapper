@@ -5,6 +5,7 @@ import json
 import re
 import requests
 import feedparser
+import google.generativeai as genai
 from bs4 import BeautifulSoup
 from newspaper import Article
 import streamlit as st
@@ -26,9 +27,26 @@ client = InferenceClient(
     api_key=os.environ.get("xdpooja", "")
 )
 
-def summarize_text(text: str) -> str:
+# ======================
+# Gemini Setup
+# ======================
+GEMINI_API_KEY = "AIzaSyCqByj1Uuw8O4tGcEWbhS7uuVEVLeG0MOY"
+genai.configure(api_key=GEMINI_API_KEY)
+# Use gemini-1.5-flash for speed and cost efficiency
+gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+
+def summarize_text(text: str, method: str = "Hugging Face") -> str:
     if not text or not text.strip():
         return "No content to summarize."
+    
+    if method == "Gemini AI":
+        try:
+            prompt = f"Summarize the following news article briefly (2-3 sentences):\n\n{text[:5000]}"
+            response = gemini_model.generate_content(prompt)
+            return response.text.strip()
+        except Exception as e:
+            return f"Gemini Summarization Error: {e}"
+            
     try:
         result = client.summarization(text, model="Falconsai/text_summarization")
         if hasattr(result, "summary_text"):
@@ -338,6 +356,45 @@ def classify_article(title, source, link, article_text, compiled_clusters,
     primary = sorted(tied)[0]
     return primary, scores[primary], scores
 
+def classify_article_gemini(headline, source, content, cluster_names):
+    """
+    Uses Gemini to classify an article into one of the provided clusters.
+    """
+    if not content or len(content.strip()) < 50:
+        content = "No content available. Classify based on headline only."
+    
+    clusters_str = ", ".join(cluster_names)
+    prompt = f"""
+    You are a professional news analyst. Classify the following news article into EXACTLY ONE of these sectors/clusters:
+    [{clusters_str}]
+
+    If it fits multiple, pick the most relevant one. 
+    If it fits NONE of them, respond with "NONE".
+
+    Article Headline: {headline}
+    Source: {source}
+    Full Content snippet: {content[:2000]}
+
+    Respond ONLY with the name of the cluster or "NONE". Do not provide any explanation.
+    """
+    try:
+        response = gemini_model.generate_content(prompt)
+        result = response.text.strip()
+        # Clean up in case Gemini adds markdown or extra text
+        result = result.replace("**", "").replace('"', '').replace("'", "").strip()
+        
+        if result in cluster_names:
+            return result, 1.0, {result: 1.0}
+        else:
+            # Check for case-insensitive match
+            for c in cluster_names:
+                if result.lower() == c.lower():
+                    return c, 1.0, {c: 1.0}
+            return None, 0.0, {}
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        return None, 0.0, {}
+
 # ======================
 # EXPORTS (unchanged)
 # ======================
@@ -449,6 +506,20 @@ if mode == "Advanced v2 (clusters + scoring)":
             st.sidebar.error(f"Failed to parse config: {e}")
 
     st.sidebar.caption("This loader accepts UDAN-style JSON or simple {cluster:[terms]} JSON.")
+    
+    classification_method = st.sidebar.radio(
+        "Classification Engine",
+        ["Keyword-based (Fast)", "Gemini AI (High Accuracy)"],
+        index=1,
+        help="Keyword-based is fast and deterministic. Gemini is more accurate but requires API calls."
+    )
+    
+    summarization_method = st.sidebar.radio(
+        "Summarization Engine",
+        ["Hugging Face", "Gemini AI"],
+        index=0,
+        help="Select which AI model to use for article summarization."
+    )
 
 # ======================
 # Search Controls
@@ -524,7 +595,7 @@ if st.button(btn_label):
             if ("india" not in haystack) and ("indian" not in haystack):
                 continue
 
-        summary = summarize_text(article)
+        summary = summarize_text(article, method=summarization_method if 'summarization_method' in locals() else "Hugging Face")
 
         row = {
             "Source": source,
@@ -536,10 +607,17 @@ if st.button(btn_label):
         }
 
         if mode.startswith("Advanced"):
-            primary_cluster, relevance, matches = classify_article(
-                title, source, link, article, compiled,
-                w_title=1.0, w_source=1.0, w_url=0.5, w_body=4.0
-            )
+            if 'classification_method' in locals() and classification_method == "Gemini AI (High Accuracy)":
+                cluster_names = list(st.session_state.get("clusters", DEFAULT_CLUSTERS).keys())
+                primary_cluster, relevance, matches = classify_article_gemini(
+                    title, source, article, cluster_names
+                )
+            else:
+                primary_cluster, relevance, matches = classify_article(
+                    title, source, link, article, compiled,
+                    w_title=1.0, w_source=1.0, w_url=0.5, w_body=4.0
+                )
+            
             matched_names_sorted = [k for k, _ in sorted(matches.items(), key=lambda kv: kv[1], reverse=True)] if matches else []
             row.update({
                 "PrimaryCluster": primary_cluster,
