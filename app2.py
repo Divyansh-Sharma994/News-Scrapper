@@ -347,35 +347,38 @@ if not st.session_state.articles:
 else:
     st.success(f"✅ Ready to analyze {len(st.session_state.articles)} articles from '{st.session_state.get('last_query', 'your search')}'")
     
-    extract_button = st.button("🔍 Extract Trending Entities", type="primary", use_container_width=True, key="extract_ner_btn")
+    extract_button = st.button("🔍 Extract Top Trending Companies", type="primary", use_container_width=True, key="extract_ner_btn")
     
     if extract_button:
-        with st.spinner("🧠 Analyzing articles to identify trending agencies..."):
+        with st.spinner("🧠 Analyzing articles with advanced NER to identify top companies..."):
             try:
-                # Import only the pattern-based extraction to avoid spaCy errors
-                from ner_entity_extractor import NEREntityExtractor
+                # Use advanced NER extractor
+                from advanced_ner_extractor import extract_top_companies
                 
-                extractor = NEREntityExtractor()
-                # Use pattern-based extraction (no spaCy dependency)
-                entities_with_counts = extractor.extract_entities_pattern(st.session_state.articles)
-                
-                # Rank entities - automatically filters by minimum mentions (3)
-                ranked_entities = extractor.rank_entities(
-                    entities_with_counts, 
-                    len(st.session_state.articles), 
-                    min_mentions=3  # Fixed backend threshold
+                # Extract top 10 companies using dominance-based ranking
+                top_companies = extract_top_companies(
+                    st.session_state.articles,
+                    st.session_state.get('last_query', 'search'),
+                    top_n=10
                 )
                 
-                # Add rank numbers and take top 10
-                for i, entity in enumerate(ranked_entities[:10], 1):
-                    entity['rank'] = i
-                
-                st.session_state.trending_agencies = ranked_entities[:10]
+                # Map to display format
+                st.session_state.trending_agencies = []
+                for company in top_companies:
+                    st.session_state.trending_agencies.append({
+                        'rank': company['rank'],
+                        'name': company['name'],
+                        'mentions': company['mentions'],
+                        'percentage': company['coverage_pct'],
+                        'confidence': company['dominance_score'],
+                        'entity_type': company['entity_type'],
+                        'context_diversity': company['sources']
+                    })
                 
                 if st.session_state.trending_agencies:
-                    st.success(f"✅ Found {len(st.session_state.trending_agencies)} trending agencies/brands!")
+                    st.success(f"✅ Found {len(st.session_state.trending_agencies)} dominant companies/organizations!")
                 else:
-                    st.warning("⚠️ No entities found. Try fetching more articles.")
+                    st.warning("⚠️ No companies found. Try fetching more articles.")
             except Exception as e:
                 st.error(f"❌ Error during entity extraction: {str(e)}")
                 import traceback
@@ -383,33 +386,34 @@ else:
     
     # Display trending agencies
     if st.session_state.trending_agencies:
-        st.markdown("### 📊 Top 10 Trending Entities")
+        st.markdown("### 📊 Top 10 Dominant Companies & Organizations")
+        st.caption("Ranked by dominance score (involvement + coverage + diversity)")
         
         for agency in st.session_state.trending_agencies:
             rank = agency['rank']
             name = agency['name']
             mentions = agency['mentions']
             percentage = agency['percentage']
-            confidence = agency['confidence']
+            dominance = agency['confidence']  # This is dominance_score
+            sources = agency.get('context_diversity', 0)
             entity_type = agency['entity_type']
             
-            # Color coding based on confidence
-            if confidence >= 80:
+            # Color coding based on dominance score
+            if dominance >= 70:
                 badge = "🟢"
                 color = "#28a745"
-            elif confidence >= 60:
+                level = "High Dominance"
+            elif dominance >= 50:
                 badge = "🟡"
                 color = "#ffc107"
+                level = "Medium Dominance"
             else:
                 badge = "🟠"
                 color = "#fd7e14"
+                level = "Emerging"
             
             # Entity type emoji
-            type_emoji = {
-                'company': '🏢',
-                'government_agency': '🏛️',
-                'research_org': '🔬'
-            }.get(entity_type, '🏢')
+            type_emoji = '🏢'  # All are companies/organizations
             
             st.markdown(f"""
             <div style='padding: 15px; margin: 10px 0; border-left: 5px solid {color}; 
@@ -419,8 +423,9 @@ else:
                         <strong style='font-size: 1.2em;'>{badge} #{rank} {name}</strong> {type_emoji}
                         <br>
                         <small style='opacity: 0.8;'>
-                            📰 {mentions} mentions ({percentage}%) • 
-                            🎯 Confidence: {confidence}%
+                            📰 {mentions} mentions • 📊 {percentage}% coverage • 
+                            🎯 Dominance: {dominance:.1f} ({level}) • 
+                            🌐 {sources} sources
                         </small>
                     </div>
                 </div>
