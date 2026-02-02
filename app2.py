@@ -329,3 +329,102 @@ if st.session_state.articles:
             file_name=f"news_{st.session_state.get('last_query', 'results')}.csv",
             mime="text/csv"
         )
+    
+    # --- NER ENTITY EXTRACTION SECTION ---
+    st.markdown("---")
+    st.subheader("🏢 Top Trending Agencies & Brands")
+    st.info("📊 Extract and rank the most mentioned companies, agencies, and brands from the fetched articles using advanced NER")
+    
+    # Initialize session state for agencies
+    if "trending_agencies" not in st.session_state:
+        st.session_state.trending_agencies = []
+    
+    col_ner1, col_ner2 = st.columns([3, 1])
+    with col_ner1:
+        min_mentions = st.slider("Minimum mentions to include", min_value=2, max_value=10, value=3, 
+                                help="Filter out entities with fewer mentions")
+    with col_ner2:
+        st.write("")  # Spacing
+        st.write("")  # Spacing
+        extract_button = st.button("🔍 Extract Trending Entities", type="primary", use_container_width=True)
+    
+    if extract_button:
+        from ner_entity_extractor import extract_trending_agencies
+        
+        with st.spinner("🧠 Analyzing articles with NER to identify trending agencies..."):
+            try:
+                trending = extract_trending_agencies(
+                    st.session_state.articles, 
+                    st.session_state.get('last_query', active_query),
+                    min_mentions=min_mentions,
+                    top_n=10
+                )
+                st.session_state.trending_agencies = trending
+                
+                if trending:
+                    st.success(f"✅ Found {len(trending)} trending agencies/brands!")
+                else:
+                    st.warning("⚠️ No entities found matching the criteria. Try lowering the minimum mentions.")
+            except Exception as e:
+                st.error(f"❌ Error during entity extraction: {str(e)}")
+                st.info("💡 Tip: Make sure spaCy is installed. Run: `pip install spacy && python -m spacy download en_core_web_sm`")
+    
+    # Display trending agencies
+    if st.session_state.trending_agencies:
+        st.markdown("### 📊 Top 10 Trending Entities")
+        
+        for agency in st.session_state.trending_agencies:
+            rank = agency['rank']
+            name = agency['name']
+            mentions = agency['mentions']
+            percentage = agency['percentage']
+            confidence = agency['confidence']
+            entity_type = agency['entity_type']
+            
+            # Color coding based on confidence
+            if confidence >= 80:
+                badge = "🟢"
+                color = "#28a745"
+            elif confidence >= 60:
+                badge = "🟡"
+                color = "#ffc107"
+            else:
+                badge = "🟠"
+                color = "#fd7e14"
+            
+            # Entity type emoji
+            type_emoji = {
+                'company': '🏢',
+                'government_agency': '🏛️',
+                'research_org': '🔬'
+            }.get(entity_type, '🏢')
+            
+            st.markdown(f"""
+            <div style='padding: 15px; margin: 10px 0; border-left: 5px solid {color}; 
+                        background-color: rgba(0,0,0,0.05); border-radius: 5px;'>
+                <div style='display: flex; justify-content: space-between; align-items: center;'>
+                    <div>
+                        <strong style='font-size: 1.2em;'>{badge} #{rank} {name}</strong> {type_emoji}
+                        <br>
+                        <small style='opacity: 0.8;'>
+                            📰 {mentions} mentions ({percentage}%) • 
+                            🎯 Confidence: {confidence}%
+                        </small>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Download option for agencies
+        st.markdown("---")
+        agencies_df = pd.DataFrame(st.session_state.trending_agencies)
+        agencies_csv = agencies_df.to_csv(index=False)
+        
+        st.download_button(
+            label="📥 Download Trending Agencies (CSV)",
+            data=agencies_csv,
+            file_name=f"trending_agencies_{st.session_state.get('last_query', 'results')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+

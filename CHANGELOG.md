@@ -1,53 +1,95 @@
-# Changelog
+# Changelog - News Intelligence System
 
-All notable changes to this project will be documented in this file.
+## [Dev4 Branch] - 2026-02-02
 
-## [Unreleased] - 2026-02-02
+### Added - NER-Based Entity Extraction Feature
 
-### Added
-- Created `CHANGELOG.md` to track project history.
-- Added `.github/coderabbit.yaml` for AI code reviews.
-- Added `xlsxwriter` to environment for Excel export support.
+#### New Files Created:
+1. **`ner_entity_extractor.py`** - Core NER module
+   - Implements `NEREntityExtractor` class with spaCy integration
+   - Uses pre-trained `en_core_web_sm` model for Named Entity Recognition
+   - Extracts ORG (organizations), PRODUCT, and GPE (geopolitical entities)
+   - Advanced filtering to remove noise words and generic terms
+   - Entity normalization (removes suffixes like Inc., Corp., Ltd.)
+   - Dual-mode operation: spaCy NER (preferred) + Pattern-based fallback
+   - Confidence scoring based on mention frequency and article coverage
+   - Entity type classification (company, government_agency, research_org)
 
-### Changed
-- **UI Polish**:
-  - **Dynamic Progress Bar**: The loader now updates in real-time (e.g., "Reading articles... 45%"), giving feedback on the exact scraping progress.
-  - **Animated Loader**: Replaced basic spinners with a **Step-by-Step Status Box**.
-  - **Scrollable Results**: Added a dedicated scrollbar area (height=800px) for the results list.
-  - **Clean Layout**: Moved summary inside dropdown.
-- **Documentation**: Added comprehensive "ELI5" (Explain Like I'm 5) comments to the entire codebase. Now non-technical users can understand what each file (`app2.py`, `article_scraper.py`, `gdelt_fetcher.py`) is doing.
-- **Capacity Upgrade**: Removed all hard limits. The app now fetches **all available articles** for the specified duration and keyword. Added concurrency control (Semaphore) to handle mass-fetching safely.
-- **Extraction Improvements**:
-  - **Redirect Handling**: Integrated `batchexecute` decoder (from `xdpooja/newsscraper`) to properly resolve Google News encrypted URLs. This fixes the "Redirecting..." page issue.
-  - **Anti-Blocking**: Added 'Referer' headers and a persistent Cookie Jar to pass checks on sites like MSN.
-  - Upgraded `article_scraper.py` to use "Text Density Heuristics" for smarter content locating.
-  - Improved "Fallback Extraction" for sites without standard paragraph tags.
-  - Removed length restriction in UI, so even short articles are displayed instead of the warning message.
-- **Rolled Back**: Reverted HTML & Image display features. Returned to "Text Summary" + "Full Text Dropdown" view.
-- **Enhanced Content Display**:
-  - Added dropdown "Read Full Article Content" to view the entire article without leaving the app.
-  - Added "Paywall Detection": The app now warns if an article requires a subscription ("🔒 Subscription Required").
-- **UI Overhaul**: Simplified `app2.py` to focus on a single "Search & Display" workflow.
-  - Added dropdown "Read Full Article Content" to view the entire article without leaving the app.
-  - Added "Paywall Detection": The app now warns if an article requires a subscription ("🔒 Subscription Required").
-- **UI Overhaul**: Simplified `app2.py` to focus on a single "Search & Display" workflow.
-  - Removed "Top Agencies" analysis feature.
-  - Unified search interface.
-  - Improved result display (Headline, Source, 3-4 line Summary).
-- **Code Quality**: Rewrote comments in `app2.py`, `article_scraper.py`, and `gdelt_fetcher.py` to be "ELI5" (Explain Like I'm 5) for better readability.
-- **Performance**: Increased network timeouts in `gdelt_fetcher.py` and `article_scraper.py` for better reliability on slow connections.
-- **Bug Fix**: Fixed Excel download MIME type in `app2.py` to prevent "file corrupted" errors.
+#### Modified Files:
+1. **`app2.py`** - Main application
+   - Added new section: "🏢 Top Trending Agencies & Brands"
+   - Integrated NER entity extraction after article display
+   - Added interactive controls:
+     - Slider for minimum mentions threshold (2-10)
+     - "Extract Trending Entities" button
+   - Display features:
+     - Top 10 ranked entities with visual cards
+     - Color-coded confidence badges (🟢 High, 🟡 Medium, 🟠 Low)
+     - Entity type icons (🏢 Company, 🏛️ Government, 🔬 Research)
+     - Metrics: mentions count, percentage, confidence score
+   - Download option for trending agencies (CSV format)
+   - Error handling with helpful installation tips
 
-## [Advanced AI Enhancement] - 2026-02-02
+2. **`requirements.txt`**
+   - Added: `spacy>=3.7.0`
 
-### Added
-- **Gemini 1.5 Flash Optimization**: Optimized **Gemini 1.5 Flash** for high-depth intelligence and long-context processing (up to 15,000 characters).
-- **Deep-Article Intelligence Summaries**: Developed **Comprehensive Business Summaries** that analyze stakeholders, future outlook, and financial data in detail.
-- **Async Enrichment**: Integrated the AI classification loop directly into the `aiohttp` parallel scraping pipeline to minimize latency while using the more powerful Pro model.
-  
-- **Technical workflow & Techniques**:
-  - **Semantic Parsing**: Uses JSON-mode prompts to ensure deterministic AI output for sector names.
-  - **Heuristic Fallbacks**: Added logic to verify AI classification against a predefined list of core industries while allowing descriptive expansion for niche topics.
-  - **Async Enrichment**: Integrated the AI classification loop directly into the `aiohttp` parallel scraping pipeline to minimize latency.
+### Technical Implementation Details:
 
-- **Satyam's Contribution**: Satyam directed the overhaul of the sector classification engine, specifically the transition from keyword matching to Gemini-powered semantic analysis. He ensured that the "Sector properly for sector classification" requirement was met with high precision.
+#### NER Extraction Pipeline:
+1. **Text Preprocessing**:
+   - Combines title, description, and first 500 chars of full text
+   - Prioritizes title content (3x weight multiplier)
+
+2. **Entity Recognition**:
+   - Primary: spaCy's statistical NER model
+   - Fallback: Regex-based capitalized word extraction
+   - Filters: Noise words, generic terms, dates, numbers
+
+3. **Entity Normalization**:
+   - Removes common corporate suffixes
+   - Deduplicates variations of same entity
+
+4. **Ranking Algorithm**:
+   - Frequency-based scoring
+   - Percentage of articles mentioning entity
+   - Confidence calculation: min(95, (count / (total_articles * 0.1)) * 100)
+   - Minimum mentions threshold (user-configurable)
+
+5. **Classification**:
+   - Government agencies: Keywords like "ministry", "department", "bureau"
+   - Research orgs: Keywords like "university", "institute", "lab"
+   - Default: Company
+
+### User Experience:
+- **Workflow**: Fetch articles → Extract entities → View ranked list → Download CSV
+- **Visual Design**: Color-coded confidence indicators, entity type icons
+- **Flexibility**: Adjustable minimum mentions threshold
+- **Error Handling**: Graceful fallback if spaCy not installed
+
+### Installation Requirements:
+```bash
+pip install spacy>=3.7.0
+python -m spacy download en_core_web_sm
+```
+
+### Usage:
+1. Run the app and fetch news articles (existing functionality)
+2. Scroll to "Top Trending Agencies & Brands" section
+3. Adjust minimum mentions slider if needed
+4. Click "Extract Trending Entities"
+5. View ranked list of top 10 agencies/brands
+6. Download CSV for further analysis
+
+### Benefits:
+- **Accuracy**: Uses state-of-the-art NER instead of simple keyword matching
+- **Context-Aware**: Understands entity boundaries and types
+- **Robust**: Filters out noise and generic terms
+- **Scalable**: Handles large article datasets efficiently
+- **User-Friendly**: Simple one-click extraction with visual results
+
+### Future Enhancements (Potential):
+- Multi-language NER support
+- Entity linking to knowledge bases (Wikipedia, Wikidata)
+- Sentiment analysis per entity
+- Trend visualization over time
+- Entity relationship extraction

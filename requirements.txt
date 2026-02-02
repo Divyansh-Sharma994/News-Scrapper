@@ -8,3 +8,4 @@ python-docx>=0.8.11
 xlsxwriter>=3.0.0
 lxml>=4.9.0
 google-generativeai
+spacy>=3.7.0
