@@ -4,14 +4,28 @@ Implements strict company/organization filtering with dominance-based ranking
 """
 
 import re
-from collections import Counter, defaultdict
-from typing import List, Dict, Tuple, Set
+from collections import defaultdict
+from typing import List, Dict, Tuple
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 # Use transformers-based NER (optional - fallback to pattern-based)
 NER_AVAILABLE = False
 ner_pipeline = None
+
+import google.generativeai as genai
+import os
+
+# Initialize Gemini if key exists
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        GEMINI_AVAILABLE = True
+    except:
+        GEMINI_AVAILABLE = False
+else:
+    GEMINI_AVAILABLE = False
 
 try:
     from transformers import pipeline
@@ -31,6 +45,7 @@ class AdvancedNERExtractor:
     
     def __init__(self):
         self.ner = ner_pipeline
+        self.gemini_cache = {}  # Cache for Gemini validation
         
         # STRICT: Publishers and news outlets to exclude
         self.excluded_publishers = {
@@ -47,7 +62,8 @@ class AdvancedNERExtractor:
             'ministry', 'office', 'bureau', 'agency', 'service', 'center',
             'institute', 'foundation', 'trust', 'group', 'team', 'committee',
             'council', 'board', 'commission', 'authority', 'people', 'public',
-            'officials', 'sources', 'experts', 'analysts', 'investors', 'customers'
+            'officials', 'sources', 'experts', 'analysts', 'investors', 'customers',
+            'budget', 'mission', 'fund', 'scheme', 'plan', 'survey'
         }
         
         # STRICT: Location/country indicators
@@ -55,7 +71,8 @@ class AdvancedNERExtractor:
             'india', 'indian', 'us', 'usa', 'uk', 'china', 'chinese', 'japan',
             'america', 'american', 'europe', 'european', 'asia', 'asian',
             'delhi', 'mumbai', 'bangalore', 'london', 'new york', 'beijing',
-            'tokyo', 'singapore', 'dubai', 'california', 'texas'
+            'tokyo', 'singapore', 'dubai', 'california', 'texas',
+            'bharat', 'central', 'national', 'global', 'international'
         }
         
         # Known company suffixes for validation
@@ -68,6 +85,49 @@ class AdvancedNERExtractor:
         # Main actor position indicators (headline structure)
         self.main_actor_positions = ['start', 'subject']  # First 3 words or subject position
     
+    def _validate_with_gemini(self, entity: str, headline: str) -> bool:
+        """
+        FINAL VALIDATION LAYER: Uses Gemini to confirm entity is a company.
+        Strict YES/NO decision. Cached.
+        """
+        if not GEMINI_AVAILABLE:
+            return True  # Fallback: Assume valid if passed rules
+            
+        # Check cache (entity + headline context)
+        cache_key = f"{entity}|{headline}"
+        if cache_key in self.gemini_cache:
+            return self.gemini_cache[cache_key]
+        
+        # Only validate ambiguous or short names (to save calls)
+        # Long names with company suffixes (e.g. "Apple Inc") are already safe
+        is_obvious_company = any(s in entity.lower() for s in self.company_suffixes)
+        if len(entity.split()) > 2 and is_obvious_company:
+            return True
+            
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            prompt = f"""
+            Task: Validate if '{entity}' is a COMPANY or ORGANIZATION in this headline.
+            Headline: "{headline}"
+            
+            Rules:
+            1. Return "YES" if it is a specific commercial company, brand, or organization (e.g., Apple, OpenAI, WHO).
+            2. Return "NO" if it is a person, location, government body, product, generic term, or abstract concept (e.g., Budget, AI Mission, London, ChatGPT).
+            3. Strict YES or NO output only.
+            """
+            
+            response = model.generate_content(prompt)
+            result = response.text.strip().upper()
+            
+            is_valid = "YES" in result
+            self.gemini_cache[cache_key] = is_valid
+            return is_valid
+            
+        except Exception as e:
+            # On error, fallback to True (don't block pipeline)
+            print(f"⚠️ Gemini validation error: {e}")
+            return True
+
     def _is_valid_company_name(self, entity: str) -> bool:
         """
         STRICT validation: Is this truly a company/organization name?
@@ -91,7 +151,7 @@ class AdvancedNERExtractor:
             return False
         
         # Rule 5: Minimum length
-        if len(entity) < 2:
+        if len(entity) < 3:  # Increased to 3 to filter "AI", "US"
             return False
         
         # Rule 6: Cannot be all uppercase (likely acronym without context)
@@ -159,7 +219,7 @@ class AdvancedNERExtractor:
     
     def extract_entities_ner(self, articles: List[Dict]) -> Dict[str, Dict]:
         """
-        Extract entities using NER with strict filtering
+        Extract entities using NER with strict filtering & Gemini validation
         Returns: {entity_name: {mentions, involvement_scores, headlines}}
         """
         entity_data = defaultdict(lambda: {
@@ -187,11 +247,15 @@ class AdvancedNERExtractor:
             total_words = len(headline_words)
             
             for entity, position in entities:
-                # STRICT: Validate company/organization
+                # 1. STRICT: Validate company/organization name format
                 if not self._is_valid_company_name(entity):
                     continue
                 
-                # Calculate involvement score
+                # 2. FINAL VALIDATION: Gemini (Context-aware check)
+                if not self._validate_with_gemini(entity, headline):
+                    continue
+                
+                # 3. Calculate involvement score
                 involvement = self._calculate_involvement_score(
                     entity, headline, position, total_words
                 )
@@ -257,87 +321,72 @@ class AdvancedNERExtractor:
                 i += 1
         
         return entities
-    
-    def rank_by_dominance(self, entity_data: Dict[str, Dict], total_articles: int) -> List[Dict]:
+    def rank_by_dominance(self, data: Dict, total_articles: int) -> List[Dict]:
         """
         Rank entities by DOMINANCE, not just frequency
         """
         ranked = []
         
-        for entity, data in entity_data.items():
-            mentions = data['mentions']
-            article_count = data['article_count']
-            involvement_scores = data['involvement_scores']
-            source_count = len(data['sources'])
+        for name, d in data.items():
+            mentions = d['mentions']
+            # Support both structure names (in case of legacy data)
+            article_count = d.get('article_count', len(d.get('articles', [])))
+            sources = len(d['sources'])
+            involvement_scores = d.get('involvement_scores', d.get('involvement', []))
             
-            # NOISE REMOVAL: Minimum thresholds (adjusted for smaller datasets)
-            if mentions < 2:  # Minimum 2 mentions (lowered from 3)
+            # NOISE REMOVAL: Minimum thresholds
+            min_mentions = 1 if total_articles < 10 else 2
+            if mentions < min_mentions:
                 continue
             
             coverage_ratio = article_count / max(total_articles, 1)
-            # Dynamic threshold: 1% for large datasets, 0.5% for smaller ones
-            min_coverage = 0.005 if total_articles > 100 else 0.003
+            min_coverage = 0.003 if total_articles < 100 else 0.005
             if coverage_ratio < min_coverage:
                 continue
             
             # DOMINANCE SCORE CALCULATION
-            # Factor 1: Coverage (30%)
             coverage_score = min(coverage_ratio * 100, 30)
             
-            # Factor 2: Average involvement (40%)
-            avg_involvement = sum(involvement_scores) / len(involvement_scores)
+            avg_involvement = 0
+            if involvement_scores:
+                avg_involvement = sum(involvement_scores) / len(involvement_scores)
             involvement_score = avg_involvement * 40
             
-            # Factor 3: Source diversity (20%)
-            diversity_score = min(source_count / 10, 1.0) * 20
+            diversity_score = min(sources / 10, 1.0) * 20
             
-            # Factor 4: Consistency (10%)
-            # Mentions per article (higher = more consistent)
             consistency = mentions / max(article_count, 1)
             consistency_score = min(consistency / 3, 1.0) * 10
             
-            # Total dominance score
             dominance_score = coverage_score + involvement_score + diversity_score + consistency_score
             
             ranked.append({
-                'name': entity,
+                'name': name,
                 'mentions': mentions,
                 'articles': article_count,
                 'coverage_pct': round(coverage_ratio * 100, 2),
                 'avg_involvement': round(avg_involvement * 100, 1),
-                'sources': source_count,
+                'sources': sources,
                 'dominance_score': round(dominance_score, 2),
                 'entity_type': 'company'
             })
         
-        # Sort by dominance score (descending)
         ranked.sort(key=lambda x: x['dominance_score'], reverse=True)
         
-        # Add ranks
         for i, item in enumerate(ranked, 1):
             item['rank'] = i
         
         return ranked
 
-
 def extract_top_companies(articles: List[Dict], query: str, top_n: int = 10) -> List[Dict]:
     """
     Main function: Extract top trending companies/organizations
-    
-    Args:
-        articles: List of article dictionaries with 'title', 'source'
-        query: Search query (for context)
-        top_n: Number of top entities to return
-    
-    Returns:
-        List of top N companies ranked by dominance
     """
     if not articles:
         return []
     
     extractor = AdvancedNERExtractor()
     
-    # Step 1: Extract entities with NER
+    # Step 1: Extract entities with NER (and Gemini validation)
     entity_data = extractor.extract_entities_ner(articles)
     
     # Step 2: Rank by dominance

@@ -1,0 +1,8 @@
+{
+    "integration_point_in_code": "AdvancedNERExtractor.extract_entities_ner method loop, inserted immediately after _is_valid_company_name() check and before involvement scoring.",
+    "gemini_prompt_template": "Task: Validate if '{entity}' is a COMPANY or ORGANIZATION in this headline.\nHeadline: \"{headline}\"\n\nRules:\n1. Return \"YES\" if it is a specific commercial company, brand, or organization (e.g., Apple, OpenAI, WHO).\n2. Return \"NO\" if it is a person, location, government body, product, generic term, or abstract concept (e.g., Budget, AI Mission, London, ChatGPT).\n3. Strict YES or NO output only.",
+    "gemini_validation_function": "def _validate_with_gemini(self, entity, headline): uses gemini-1.5-flash model with the strict YES/NO prompt. Returns boolean. Includes error handling fallback to True to ensure pipeline continuity.",
+    "caching_strategy": "self.gemini_cache = {} dictionary initialized in __init__. Key is f'{entity}|{headline}' to capture context. Stores boolean result. Code checks cache before API call. Also skips API call for safe/obvious company names (long names with suffixes like 'Inc', 'Ltd') to minimize costs/latency.",
+    "entity_filtering_flow": "1. Extract candidates (NER/Patterns) -> 2. Regex/Rule-based Filter (_is_valid_company_name) -> 3. Gemini Context Validation (_validate_with_gemini) -> 4. Involvement Scoring -> 5. Dominance Ranking. Entities failing Step 3 are strictly discarded.",
+    "final_output_guarantee": "Only real companies and organizations remain"
+}
